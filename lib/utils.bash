@@ -2,10 +2,11 @@
 
 set -euo pipefail
 
-# TODO: Ensure this is the correct GitHub homepage where releases can be downloaded for cipherstash.
 GH_REPO="https://github.com/cipherstash/cli-releases"
 TOOL_NAME="cipherstash"
 TOOL_TEST="stash --help"
+OS="${OS:-unknown}"
+ARCH="${ARCH:-unknown}"
 
 fail() {
 	echo -e "asdf-$TOOL_NAME: $*"
@@ -27,22 +28,72 @@ sort_versions() {
 list_github_tags() {
 	git ls-remote --tags --refs "$GH_REPO" |
 		grep -o 'refs/tags/.*' | cut -d/ -f3- |
-		sed 's/^v//' # NOTE: You might want to adapt this sed to remove non-version strings from tags
+		sed 's/^release-//'
 }
 
 list_all_versions() {
-	# TODO: Adapt this. By default we simply list the tag names from GitHub releases.
-	# Change this function if cipherstash has other means of determining installable versions.
 	list_github_tags
+}
+
+detect_os() {
+	if [ "$OS" = "unknown" ]; then
+		UNAME="$(command -v uname)"
+
+		case $("${UNAME}" | tr '[:upper:]' '[:lower:]') in
+		linux*)
+			echo 'unknown-linux-gnu'
+			;;
+		darwin*)
+			echo 'apple-darwin.dmg'
+			;;
+		# Unsupported for now, I have no machine to test this on.
+		# msys* | cygwin* | mingw*)
+		# 	echo 'Windows'
+		# 	;;
+		# nt | win*)
+		# 	echo 'Windows'
+		# 	;;
+		*)
+			fail "Unknown operating system. Please provide the operating system version by setting \$OS."
+			;;
+		esac
+	else
+		echo "$OS"
+	fi
+}
+
+detect_arch() {
+	if [ "$ARCH" = "unknown" ]; then
+		if ! ARCH="$(uname -m)"; then
+			fail "\$ARCH not provided and could not call uname -m."
+		fi
+
+		# Translate to Auth0 CLI arch names/explicit list of supported arch
+		if [ "${ARCH}" == "x86_64" ]; then
+			echo "$ARCH"
+		elif [ "${ARCH}" == "amd64" ]; then
+			echo "x86_64"
+		elif [ "${ARCH}" == "arm64" ]; then
+			echo "aarch64"
+		elif [ "${ARCH}" == "i386" ]; then
+			fail "Unsupported architecture: $ARCH"
+		elif [ "${ARCH}" == "armv7" ]; then
+			fail "Unsupported architecture: $ARCH"
+		else
+			fail "Unknown architecture. Please provide the architecture by setting \$ARCH."
+		fi
+	else
+		echo "$ARCH"
+	fi
 }
 
 download_release() {
 	local version filename url
 	version="$1"
 	filename="$2"
-
-	# TODO: Adapt the release URL convention for cipherstash
-	url="$GH_REPO/archive/v${version}.tar.gz"
+	os=$(detect_os)
+	arch=$(detect_arch)
+	url="$GH_REPO/releases/download/release-${version}/stash-${arch}-${os}"
 
 	echo "* Downloading $TOOL_NAME release $version..."
 	curl "${curl_opts[@]}" -o "$filename" -C - "$url" || fail "Could not download $url"
@@ -59,9 +110,9 @@ install_version() {
 
 	(
 		mkdir -p "$install_path"
-		cp -r "$ASDF_DOWNLOAD_PATH"/* "$install_path"
+		mv "$ASDF_DOWNLOAD_PATH/stash" "$install_path/stash"
+		chmod +x "$install_path/stash"
 
-		# TODO: Assert cipherstash executable exists.
 		local tool_cmd
 		tool_cmd="$(echo "$TOOL_TEST" | cut -d' ' -f1)"
 		test -x "$install_path/$tool_cmd" || fail "Expected $install_path/$tool_cmd to be executable."
